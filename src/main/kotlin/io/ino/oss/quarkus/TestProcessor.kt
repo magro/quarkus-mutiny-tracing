@@ -12,6 +12,7 @@ import org.eclipse.microprofile.reactive.messaging.Outgoing
 @ApplicationScoped
 class TestProcessor() {
 
+    // Tracing works as expected
     @Incoming("items1")
     @Outgoing("processed-items")
     fun processItems(items: Multi<String>): Multi<Triple<String, String, String>> {
@@ -28,6 +29,7 @@ class TestProcessor() {
             }
     }
 
+    // Tracing broken for the 2nd element of the substream
     @Incoming("items2")
     @Outgoing("processed-keyedMulti-items")
     fun processItemsByKey(items: Multi<String>): Multi<Triple<String, String, String>> {
@@ -43,6 +45,7 @@ class TestProcessor() {
                 Log.infof("Processing keyedStream for key %s", keyedStream.key())
                 keyedStream
                     .onItem().transform { (item, originalTraceId) ->
+                        // The traceId for the 2nd item in each keyed substream is wrong (it's the traceId of the first item)
                         Log.infof("Keyed processing item: %s with traceId: %s", item, originalTraceId)
                         val traceId = Span.fromContext(Context.current()).spanContext.traceId
                         Triple(item, originalTraceId, traceId)
@@ -50,6 +53,7 @@ class TestProcessor() {
             }
     }
 
+    // Tracing broken for the 2nd element of the substream
     @Incoming("items3")
     @Outgoing("processed-grouped-items")
     fun processItemsFlat(items: Multi<String>): Multi<Triple<String, String, String>> {
@@ -63,6 +67,7 @@ class TestProcessor() {
             .flatMap {
                 Log.infof("Processing substream for group %s", it.key())
                 it.onItem().transform { (item, originalTraceId) ->
+                    // The traceId for the 2nd item in each keyed substream is wrong (it's the traceId of the first item)
                     Log.infof("Processing flat item: %s with traceId: %s", item, originalTraceId)
                     val traceId = Span.fromContext(Context.current()).spanContext.traceId
                     Triple(item, originalTraceId, traceId)
@@ -70,6 +75,7 @@ class TestProcessor() {
             }
     }
 
+    // Tracing broken for the 2nd element of the substream
     @Incoming("items4")
     @Outgoing("processed-groupedMulti-items")
     fun processItemsGrouped(items: Multi<String>): Multi<Triple<String, String, String>> {
@@ -84,6 +90,7 @@ class TestProcessor() {
             .flatMap {
                 Log.infof("Processing substream for multi %s", it.group())
                 it.onItem().transform { (item, originalTraceId) ->
+                    // The traceId for the 2nd item in each keyed substream is wrong (it's the traceId of the first item)
                     Log.infof("Processing multi item: %s with traceId: %s", item, originalTraceId)
                     val traceId = Span.fromContext(Context.current()).spanContext.traceId
                     Triple(item, originalTraceId, traceId)
