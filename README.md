@@ -1,6 +1,34 @@
 # Grouped Multi Trace Propagation Reproducer
 
-This project reproduces an issue with Quarkus/Mutiny trace propagation with grouped `Multi`.
+This project reproduces an issue with Quarkus/Mutiny trace propagation with grouped `Multi`:
+for a KeyedMulti (or GroupedMulti in general) the traceId / trace context is wrong for all elements after the first one of a given substream.
+
+With the following example:
+```kotlin
+@Incoming("items")
+@Outgoing("processed-items")
+fun processItems(items: Multi<String>): Multi<Triple<String, String, String>> {
+    return items
+        .map { item ->
+            val traceId = Span.fromContext(Context.current()).spanContext.traceId
+            item to traceId
+        }
+        .group().by { it.first[0] }
+        .flatMap {
+            it.onItem().transform { (item, originalTraceId) ->
+                // The traceId for the 2nd item in each substream is wrong (it's the traceId of the first item)
+                val traceId = Span.fromContext(Context.current()).spanContext.traceId
+                Triple(item, originalTraceId, traceId)
+            }
+        }
+}
+```
+* for input items "a1" and "a2"
+* with traceIds "t1" (for "a1") and "t2" (for "a2"),
+* the outgoing/processed results are `Triple("a1", "t1", "t1")`  and `Triple("a2", "t2", "t1")`,
+* while for the latter `Triple("a2", "t2", "t2")` would be expected.
+
+## About the test code
 
 The `SimpleTracingQuarkusTest` shows that "simple" trace propagation works for a `Multi`,
 so that the trace context attached to each item is as expected - and changed with the next item
