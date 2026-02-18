@@ -30,15 +30,16 @@ fun processItems(items: Multi<String>): Multi<Triple<String, String, String>> {
 
 ## About the test code
 
-The `SimpleTracingQuarkusTest` shows that "simple" trace propagation works for a `Multi`,
+### StreamTracingQuarkusTest
+
+The `StreamTracingQuarkusTest` shows that "simple" trace propagation works for a `Multi`,
 so that the trace context attached to each item is as expected - and changed with the next item
 accordingly.
 
-The other tests like `GroupedTracingQuarkusTest` show that when the incoming items are grouped
-somehow (into substreams), the trace context of the first item of the substream is used for
+When the incoming items are grouped (into substreams), the trace context of the first item of the substream is used for
 the subsequent items in the same substream.
 
-E.g. the output for `GroupedTracingQuarkusTest` is
+E.g. the output for a grouped test is:
 ```
 16:35:47 INFO  traceId=df64da8adff8f1f6d046f3edd70aa47a, spanId=0e36d4cbd280619e [io.in.os.qu.TestProcessor] (main) Processing item: a1
 16:35:47 INFO  traceId=df64da8adff8f1f6d046f3edd70aa47a, spanId=0e36d4cbd280619e [io.in.os.qu.TestProcessor] (main) Processing substream for group a
@@ -52,4 +53,34 @@ where for item "a2" the incoming traceId is *79196acd7a07d99ffd6021f381b231af*, 
 *df64da8adff8f1f6d046f3edd70aa47a* (which is the traceId of the previous item "a1")
 
 The test then fails, because the traceId captured within the flatMap onItem processor is not the original
-one that was captured for the item earlier. 
+one that was captured for the item earlier.
+
+
+### KafkaProcessorTest
+
+The `KafkaProcessorTest` is an integration test using real Kafka (via Quarkus Dev Services) that demonstrates the trace propagation issue with grouped Multi streams.
+
+The test verifies trace propagation at multiple points:
+1. **Input**: TraceIds are injected into Kafka message headers (W3C traceparent format) by the test producer
+2. **Processing stages**: The processor captures traceIds at three stages:
+    - Initial `consume()` - when messages are first received
+    - `processKeyedStream()` - after grouping by key
+    - `publish()` - before sending to output topic
+
+   At each stage, two traceIds are captured:
+    - **Metadata traceId**: from `Message.TracingMetadata`
+    - **Context traceId**: from the current `Context.current()`
+3. **Output**: TraceId is extracted from the Kafka output record headers
+
+**Expected behavior**: All traceIds should match the original input traceId for each message.
+
+**Actual behavior**: For the second message in a grouped substream (same key), the context traceId becomes `00000000000000000000000000000000` in the `processKeyedStream()` stage, while the metadata traceId remains correct.
+
+Example failure output:
+```
+The following elements failed:
+  [2] (ProcessedItem(item=b2, traceIds=[(f2603eaebec04e8c993435a643de1d2c, f2603eaebec04e8c993435a643de1d2c), (f2603eaebec04e8c993435a643de1d2c, 00000000000000000000000000000000), (f2603eaebec04e8c993435a643de1d2c, f2603eaebec04e8c993435a643de1d2c)]), f2603eaebec04e8c993435a643de1d2c) 
+  => expected:<f2603eaebec04e8c993435a643de1d2c> but was:<00000000000000000000000000000000>
+```
+
+This shows that for item "b2" (second item with key "b"), the context traceId at position [1] (processKeyedStream stage) is invalid, even though the TracingMetadata contains the correct traceId. And this happens even after setting the current context from the TracingMetadata, which should be a workaround for the basic issue - so even the workaround doesn't work.
